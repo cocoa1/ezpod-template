@@ -1,0 +1,90 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+default_platform(:ios)
+
+platform :ios do
+  desc "OB代码检查"
+  lane :check do
+    puts "OB代码检查"
+  end
+
+  @pod_name = read_podspec["name"]
+  @version = read_podspec["version"]
+
+  desc "OB组件校验"
+  lane :lint do
+    system("pod repo update EZZE-CocoaPodSpecs")
+
+    pod_lib_lint(podspec: "#{@pod_name}.podspec",
+                 sources: ["https://github.com/cocoa1/EZZE-CocoaPodSpecs.git, https://github.com/CocoaPods/Specs.git"],
+                 allow_warnings: true,
+                 verbose: true,
+                 fail_fast: true,
+                 skip_import_validation: true,
+                 use_libraries: true,
+                 use_modular_headers: true)
+  end
+
+  desc "OB组件发版"
+  lane :pub do |options|
+    if options[:version]
+      @version = version_bump_podspec(path: "#{@pod_name}.podspec", version_number: "#{options[:version]}")
+    else
+      @version = version_bump_podspec(path: "#{@pod_name}.podspec", version_number: "#{increase_ver}")
+    end
+    git_add(path: ".")
+    git_commit(path: ".", message: "[Update]:#{@version}")
+    add_git_tag(tag: @version)
+
+    remote_branch = git_branch
+    push_to_git_remote(
+      remote: "origin",         # optional, default: "origin"
+      local_branch: "HEAD",  # optional, aliased by "branch", default: "master"
+      remote_branch: remote_branch, # optional, default is set to local_branch
+      tags: true, # optional, default: true
+    )
+
+    pod_push(path: "#{@pod_name}.podspec", repo: "EZZE-CocoaPodSpecs",
+             sources: ["https://github.com/cocoa1/EZZE-CocoaPodSpecs.git", "https://github.com/CocoaPods/Specs.git"],
+             allow_warnings: true,
+             use_bundle_exec: true,
+             use_libraries: true,
+             swift_version: "5.2",
+             skip_import_validation: true,
+             use_modular_headers: true)
+  end
+
+  desc "OB组件发版失败"
+  lane :fail do
+    #一般为本地tag重复
+    reset_git_repo(force: true)
+    system("git tag --delete #{@version}")
+  end
+
+  def increase_ver
+    if @version.include? "-"
+      @version
+    end
+    reg = "[^.0-9\s]{1}[a-zA-Z]{0,}"
+    sufix = @version.match(/#{reg}/)
+    @version = @version.gsub(/#{reg}/, "")
+    ver_i = @version.split(".").map(&:to_i)
+    ver_i[-1] = ver_i[-1] + 1
+    new_ver = ver_i.join(".")
+    new_ver = "#{new_ver}#{sufix}"
+    new_ver
+  end
+end
